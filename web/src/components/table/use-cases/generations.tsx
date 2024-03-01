@@ -23,7 +23,7 @@ import {
 } from "use-query-params";
 import { useQueryFilterState } from "@/src/features/filters/hooks/useFilterState";
 import { observationsTableColsWithOptions } from "@/src/server/api/definitions/observationsTable";
-import { formatInterval, utcDateOffsetByDays } from "@/src/utils/dates";
+import { formatIntervalSeconds, utcDateOffsetByDays } from "@/src/utils/dates";
 import useColumnVisibility from "@/src/features/column-visibility/hooks/useColumnVisibility";
 import { JSONView } from "@/src/components/ui/code";
 import { type LangfuseColumnDef } from "@/src/components/table/types";
@@ -36,6 +36,7 @@ import {
   type ExportFileFormats,
 } from "@/src/server/api/interfaces/exportTypes";
 import { useOrderByState } from "@/src/features/orderBy/hooks/useOrderByState";
+import type Decimal from "decimal.js";
 
 export type GenerationsTableRow = {
   id: string;
@@ -44,11 +45,15 @@ export type GenerationsTableRow = {
   level?: ObservationLevel;
   statusMessage?: string;
   endTime?: string;
+  timeToFirstToken?: string;
   latency?: number;
   name?: string;
   model?: string;
   input?: unknown;
   output?: unknown;
+  inputCost?: Decimal;
+  outputCost?: Decimal;
+  totalCost?: Decimal;
   traceName?: string;
   metadata?: string;
   scores: Score[];
@@ -57,6 +62,9 @@ export type GenerationsTableRow = {
     completionTokens: number;
     totalTokens: number;
   };
+  promptId?: string;
+  promptName?: string;
+  promptVersion?: string;
 };
 
 export type GenerationsTableProps = {
@@ -185,7 +193,7 @@ export default function GenerationsTable({ projectId }: GenerationsTableProps) {
     {
       accessorKey: "name",
       id: "name",
-      header: "name",
+      header: "Name",
       enableSorting: true,
     },
     {
@@ -218,6 +226,34 @@ export default function GenerationsTable({ projectId }: GenerationsTableProps) {
       enableSorting: true,
     },
     {
+      accessorKey: "endTime",
+      id: "endTime",
+      header: "End Time",
+      enableHiding: true,
+      enableSorting: true,
+    },
+    {
+      accessorKey: "timeToFirstToken",
+      id: "timeToFirstToken",
+      header: "Time to First Token",
+      enableHiding: true,
+      cell: ({ row }) => {
+        const startTime: string = row.getValue("startTime");
+        const timeToFirstToken: string | undefined =
+          row.getValue("timeToFirstToken");
+
+        if (!timeToFirstToken) {
+          return undefined;
+        }
+
+        const latencyInMs =
+          new Date(timeToFirstToken).getTime() - new Date(startTime).getTime();
+        const latencyInSeconds = latencyInMs / 1000;
+
+        return <span>{formatIntervalSeconds(latencyInSeconds)}</span>;
+      },
+    },
+    {
       accessorKey: "scores",
       id: "scores",
       header: "Scores",
@@ -232,22 +268,71 @@ export default function GenerationsTable({ projectId }: GenerationsTableProps) {
       id: "latency",
       header: "Latency",
       cell: ({ row }) => {
-        const value: number | undefined = row.getValue("latency");
-        return value !== undefined ? (
-          <span>{formatInterval(value)}</span>
+        const latency: number | undefined = row.getValue("latency");
+        return latency !== undefined ? (
+          <span>{formatIntervalSeconds(latency)}</span>
         ) : undefined;
       },
       enableHiding: true,
       enableSorting: true,
     },
     {
-      accessorKey: "cost",
-      header: "Cost",
+      accessorKey: "timePerOutputToken",
+      id: "timePerOutputToken",
+      header: "Time per Output Token",
       cell: ({ row }) => {
-        const value: number | undefined = row.getValue("cost");
+        const latency: number | undefined = row.getValue("latency");
+        const usage: {
+          promptTokens: number;
+          completionTokens: number;
+          totalTokens: number;
+        } = row.getValue("usage");
+        return latency !== undefined &&
+          (usage.completionTokens !== 0 || usage.totalTokens !== 0) ? (
+          <span>
+            {usage.completionTokens
+              ? formatIntervalSeconds(latency / usage.completionTokens)
+              : formatIntervalSeconds(latency / usage.totalTokens)}
+          </span>
+        ) : undefined;
+      },
+      defaultHidden: true,
+      enableHiding: true,
+    },
+    {
+      accessorKey: "inputCost",
+      header: "Input Cost",
+      cell: ({ row }) => {
+        const value: Decimal | undefined = row.getValue("inputCost");
 
         return value !== undefined ? (
-          <span>{usdFormatter(value)}</span>
+          <span>{usdFormatter(value.toNumber())}</span>
+        ) : undefined;
+      },
+      enableHiding: true,
+      defaultHidden: true,
+    },
+    {
+      accessorKey: "outputCost",
+      header: "Output Cost",
+      cell: ({ row }) => {
+        const value: Decimal | undefined = row.getValue("outputCost");
+
+        return value !== undefined ? (
+          <span>{usdFormatter(value.toNumber())}</span>
+        ) : undefined;
+      },
+      enableHiding: true,
+      defaultHidden: true,
+    },
+    {
+      accessorKey: "totalCost",
+      header: "Total Cost",
+      cell: ({ row }) => {
+        const value: Decimal | undefined = row.getValue("totalCost");
+
+        return value !== undefined ? (
+          <span>{usdFormatter(value.toNumber())}</span>
         ) : undefined;
       },
       enableHiding: true,
@@ -343,12 +428,46 @@ export default function GenerationsTable({ projectId }: GenerationsTableProps) {
       enableHiding: true,
       enableSorting: true,
     },
+    {
+      accessorKey: "prompt",
+      id: "prompt",
+      header: "Prompt",
+      enableHiding: true,
+      enableSorting: true,
+      cell: ({ row }) => {
+        const promptName = row.original.promptName;
+        const promptVersion = row.original.promptVersion;
+        const value = `${promptName} (v${promptVersion})`;
+        return (
+          promptName &&
+          promptVersion && (
+            <TableLink
+              path={`/project/${projectId}/prompts/${encodeURIComponent(promptName)}?version=${promptVersion}`}
+              value={value}
+              truncateAt={40}
+            />
+          )
+        );
+      },
+    },
   ];
-  const [columnVisibility, setColumnVisibility] =
+  const [columnVisibility, setColumnVisibilityState] =
     useColumnVisibility<GenerationsTableRow>(
       "generationsColumnVisibility",
       columns,
     );
+
+  const smallTableRequired =
+    columnVisibility["input"] === true || columnVisibility["output"] === true;
+
+  if (smallTableRequired && paginationState.pageSize !== 10) {
+    setPaginationState((prev) => {
+      const currentPage = prev.pageIndex;
+      const currentPageSize = prev.pageSize;
+      const newPageIndex = Math.floor((currentPage * currentPageSize) / 10);
+      return { pageIndex: newPageIndex, pageSize: 10 };
+    });
+  }
 
   const rows: GenerationsTableRow[] = generations.isSuccess
     ? generations.data.generations.map((generation) => {
@@ -358,8 +477,12 @@ export default function GenerationsTable({ projectId }: GenerationsTableProps) {
           traceName: generation.traceName,
           startTime: generation.startTime.toLocaleString(),
           endTime: generation.endTime?.toLocaleString() ?? undefined,
-          latency: generation.latency === null ? undefined : generation.latency,
-          cost: generation.calculatedTotalCost,
+          timeToFirstToken:
+            generation.completionStartTime?.toLocaleString() ?? undefined,
+          latency: generation.latency ?? undefined,
+          totalCost: generation.calculatedTotalCost ?? undefined,
+          inputCost: generation.calculatedInputCost ?? undefined,
+          outputCost: generation.calculatedOutputCost ?? undefined,
           name: generation.name ?? undefined,
           version: generation.version ?? "",
           model: generation.model ?? "",
@@ -376,6 +499,9 @@ export default function GenerationsTable({ projectId }: GenerationsTableProps) {
             completionTokens: generation.completionTokens,
             totalTokens: generation.totalTokens,
           },
+          promptId: generation.promptId ?? undefined,
+          promptName: generation.promptName ?? undefined,
+          promptVersion: generation.promptVersion ?? undefined,
         };
       })
     : [];
@@ -395,7 +521,7 @@ export default function GenerationsTable({ projectId }: GenerationsTableProps) {
           currentQuery: searchQuery ?? undefined,
         }}
         columnVisibility={columnVisibility}
-        setColumnVisibility={setColumnVisibility}
+        setColumnVisibility={setColumnVisibilityState}
         actionButtons={
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
@@ -449,11 +575,13 @@ export default function GenerationsTable({ projectId }: GenerationsTableProps) {
           pageCount: Math.ceil(totalCount / paginationState.pageSize),
           onChange: setPaginationState,
           state: paginationState,
+          // enforce a minimum page size of 10 if input or output columns are visible
+          options: smallTableRequired ? [10] : undefined,
         }}
         setOrderBy={setOrderByState}
         orderBy={orderByState}
         columnVisibility={columnVisibility}
-        onColumnVisibilityChange={setColumnVisibility}
+        onColumnVisibilityChange={setColumnVisibilityState}
       />
     </div>
   );
