@@ -8,8 +8,6 @@ locals {
   project_groups             = ["group:engineering@chaptr.ai"]
   # firestore_location         = "eur3"
   # cloud_function_users       = []
-  # google_oauth_client_id     = "691467126166-l3f7podoekaf4n30j9bs51tr5iv50vlv.apps.googleusercontent.com"
-  # google_oauth_client_secret = "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"
 }
 
 include "root" {
