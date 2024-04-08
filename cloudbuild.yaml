@@ -6,7 +6,9 @@ steps:
         "build",
         "-t",
         "europe-west1-docker.pkg.dev/langfuse-test/langfuse/langfuse:latest",
-        "web",
+        ".",
+        "--file",
+        "web/Dockerfile"
       ]
   - id: Push new langfuse image to artifact repository
     name: "gcr.io/cloud-builders/docker"
