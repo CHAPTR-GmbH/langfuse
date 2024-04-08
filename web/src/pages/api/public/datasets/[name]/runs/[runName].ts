@@ -1,4 +1,4 @@
-import { prisma } from "@/src/server/db";
+import { prisma } from "@langfuse/shared/src/db";
 import { type NextApiRequest, type NextApiResponse } from "next";
 import { z } from "zod";
 import { cors, runMiddleware } from "@/src/features/public-api/server/cors";
@@ -30,8 +30,7 @@ export default async function handler(
 
       if (authCheck.scope.accessLevel !== "all") {
         return res.status(401).json({
-          message:
-            "Access denied - need to use basic auth with secret key to GET dataset runs",
+          message: "Access denied - need to use basic auth with secret key",
         });
       }
       console.log(
@@ -54,6 +53,11 @@ export default async function handler(
         },
         include: {
           datasetRunItems: true,
+          dataset: {
+            select: {
+              name: true,
+            },
+          },
         },
       });
 
@@ -75,7 +79,12 @@ export default async function handler(
           message: "Dataset run not found",
         });
 
-      return res.status(200).json(datasetRuns[0]);
+      const { dataset, ...run } = datasetRuns[0];
+
+      return res.status(200).json({
+        ...run,
+        datasetName: dataset.name,
+      });
     } catch (error: unknown) {
       console.error(error);
       if (isPrismaException(error)) {

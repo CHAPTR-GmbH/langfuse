@@ -1,7 +1,7 @@
 import { createPrompt } from "@/src/features/prompts/server/prompt-router";
 import { verifyAuthHeaderAndReturnScope } from "@/src/features/public-api/server/apiAuth";
 import { cors, runMiddleware } from "@/src/features/public-api/server/cors";
-import { prisma } from "@/src/server/db";
+import { prisma } from "@langfuse/shared/src/db";
 import { jsonSchema } from "@/src/utils/zod";
 import { isPrismaException } from "@/src/utils/exceptions";
 import { type NextApiRequest, type NextApiResponse } from "next";
@@ -46,8 +46,7 @@ export default async function handler(
 
       if (authCheck.scope.accessLevel !== "all") {
         return res.status(401).json({
-          message:
-            "Access denied - need to use basic auth with secret key to GET prompts",
+          message: "Access denied - need to use basic auth with secret key",
         });
       }
 
@@ -112,8 +111,7 @@ export default async function handler(
 
       if (authCheck.scope.accessLevel !== "all") {
         return res.status(401).json({
-          message:
-            "Access denied - need to use basic auth with secret key to POST prompts",
+          message: "Access denied - need to use basic auth with secret key",
         });
       }
 

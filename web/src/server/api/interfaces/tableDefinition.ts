@@ -6,27 +6,27 @@ export type OptionsDefinition = {
 export type ColumnDefinition =
   | {
       name: string;
-      id?: string; // TODO: Adopt for all tables
+      id: string;
       type: "number" | "string" | "datetime" | "boolean";
       internal: string;
     }
   | {
       name: string;
-      id?: string; // TODO: Adopt for all tables
+      id: string;
       type: "stringOptions";
       options: Array<OptionsDefinition>;
       internal: string;
     }
   | {
       name: string;
-      id?: string; // TODO: Adopt for all tables
+      id: string;
       type: "arrayOptions";
       options: Array<OptionsDefinition>;
       internal: string;
     }
   | {
       name: string;
-      id?: string; // TODO: Adopt for all tables
+      id: string;
       type: "stringObject" | "numberObject";
       internal: string;
       keyOptions?: Array<string>;
@@ -35,8 +35,10 @@ export type ColumnDefinition =
 export const tableNames = [
   "traces",
   "traces_observations",
+  "traces_observationsview",
   "observations",
   "traces_scores",
+  "traces_metrics",
   "traces_parent_observation_scores",
   "sessions",
 ] as const;

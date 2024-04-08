@@ -1,6 +1,5 @@
 import { VERSION } from "@/src/constants";
-import { prisma } from "@/src/server/db";
-import { Prisma } from "@prisma/client";
+import { Prisma, prisma } from "@langfuse/shared/src/db";
 import { PostHog } from "posthog-node";
 import { v4 as uuidv4 } from "uuid";
 
@@ -238,15 +237,6 @@ async function posthogTelemetry({
       LIMIT 30
     `;
 
-    posthog.identify({
-      distinctId: "docker:" + clientId,
-      properties: {
-        environment: process.env.NODE_ENV,
-        userDomains: domains,
-        docker: true,
-        langfuseVersion: VERSION,
-      },
-    });
     posthog.capture({
       distinctId: "docker:" + clientId,
       event: "telemetry",
@@ -263,6 +253,12 @@ async function posthogTelemetry({
         datasetRunItems: countDatasetRunItems,
         startTimeframe: startTimeframe?.toISOString(),
         endTimeframe: endTimeframe.toISOString(),
+        $set: {
+          environment: process.env.NODE_ENV,
+          userDomains: domains,
+          docker: true,
+          langfuseVersion: VERSION,
+        },
       },
     });
 

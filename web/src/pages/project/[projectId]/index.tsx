@@ -1,8 +1,7 @@
-import { useState } from "react";
 import Header from "@/src/components/layouts/header";
-import { type DateTimeAggregationOption } from "@/src/features/dashboard/lib/timeseries-aggregation";
+import { findClosestInterval } from "@/src/features/dashboard/lib/timeseries-aggregation";
 import { useRouter } from "next/router";
-import { LatencyChart } from "@/src/features/dashboard/components/LatencyChart";
+import { GenerationLatencyChart } from "@/src/features/dashboard/components/LatencyChart";
 import { ChartScores } from "@/src/features/dashboard/components/ChartScores";
 import { TracesBarListChart } from "@/src/features/dashboard/components/TracesBarListChart";
 import { MetricTable } from "@/src/features/dashboard/components/MetricTable";
@@ -32,6 +31,9 @@ import { FilterBuilder } from "@/src/features/filters/components/filter-builder"
 import { type FilterState } from "@/src/features/filters/types";
 import { type ColumnDefinition } from "@/src/server/api/interfaces/tableDefinition";
 import { useQueryFilterState } from "@/src/features/filters/hooks/useFilterState";
+import { LatencyTables } from "@/src/features/dashboard/components/LatencyTables";
+import { useMemo } from "react";
+import { useSession } from "next-auth/react";
 
 export type DashboardDateRange = {
   from: Date;
@@ -39,29 +41,30 @@ export type DashboardDateRange = {
 };
 
 export default function Start() {
-  const [agg, setAgg] = useState<DateTimeAggregationOption>("7 days");
   const router = useRouter();
   const projectId = router.query.projectId as string;
   const posthog = usePostHog();
 
-  const projects = api.projects.all.useQuery();
-  const project = projects.data?.find((p) => p.id === projectId);
+  const session = useSession();
+  const project = session.data?.user?.projects.find(
+    (project) => project.id === projectId,
+  );
 
-  const currDate = new Date();
-  const FromParam = withDefault(NumberParam, addDays(currDate, -7).getTime());
-  const ToParam = withDefault(NumberParam, currDate.getTime());
-  const SelectParam = withDefault(StringParam, "Select a date range");
+  const memoizedDate = useMemo(() => new Date(), []);
 
   const [urlParams, setUrlParams] = useQueryParams({
-    from: FromParam,
-    to: ToParam,
-    select: SelectParam,
+    from: withDefault(NumberParam, addDays(memoizedDate, -7).getTime()),
+    to: withDefault(NumberParam, memoizedDate.getTime()),
+    select: withDefault(StringParam, "Select a date range"),
   });
 
-  const dateRange =
-    urlParams.from && urlParams.to
-      ? { from: new Date(urlParams.from), to: new Date(urlParams.to) }
-      : undefined;
+  const dateRange = useMemo(
+    () =>
+      urlParams.from && urlParams.to
+        ? { from: new Date(urlParams.from), to: new Date(urlParams.to) }
+        : undefined,
+    [urlParams.from, urlParams.to],
+  );
 
   const selectedOption = isValidOption(urlParams.select)
     ? urlParams.select
@@ -96,13 +99,22 @@ export default function Start() {
   const traceName: ColumnDefinition[] = [
     {
       name: "traceName",
+      id: "traceName",
       type: "stringOptions" as const,
       options: values,
       internal: "internalValue",
     },
   ];
 
-  const [userFilterState, setUserFilterState] = useQueryFilterState([]);
+  const [userFilterState, setUserFilterState] = useQueryFilterState(
+    [],
+    "dashboard",
+  );
+
+  const agg = useMemo(
+    () => (dateRange ? findClosestInterval(dateRange) ?? "7 days" : "7 days"),
+    [dateRange],
+  );
 
   const timeFilter = dateRange
     ? [
@@ -127,10 +139,9 @@ export default function Start() {
     <div className="md:container">
       <Header title={project?.name ?? "Dashboard"} />
       <div className="my-3 flex flex-wrap items-center justify-between gap-2">
-        <div className=" flex flex-col gap-2  lg:flex-row">
+        <div className=" flex flex-col gap-2 lg:flex-row">
           <DatePickerWithRange
             dateRange={dateRange}
-            setAgg={setAgg}
             setDateRangeAndOption={setDateRangeAndOption}
             selectedOption={selectedOption}
             className="my-0 max-w-full overflow-x-auto"
@@ -164,7 +175,7 @@ export default function Start() {
       </div>
       <div className="grid w-full grid-cols-1 gap-4 overflow-hidden lg:grid-cols-2 xl:grid-cols-6">
         <TracesBarListChart
-          className="col-span-1 xl:col-span-2 "
+          className="col-span-1 xl:col-span-2"
           projectId={projectId}
           globalFilterState={mergedFilterState}
         />
@@ -202,8 +213,12 @@ export default function Start() {
           projectId={projectId}
           globalFilterState={mergedFilterState}
         />
-        <LatencyChart
-          className="col-span-1 flex-auto justify-between xl:col-span-full"
+        <LatencyTables
+          projectId={projectId}
+          globalFilterState={mergedFilterState}
+        />
+        <GenerationLatencyChart
+          className="col-span-1 flex-auto justify-between lg:col-span-full"
           projectId={projectId}
           agg={agg}
           globalFilterState={mergedFilterState}

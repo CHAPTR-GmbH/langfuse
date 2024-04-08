@@ -4,8 +4,9 @@ import { DashboardCard } from "@/src/features/dashboard/components/cards/Dashboa
 import { DashboardTable } from "@/src/features/dashboard/components/cards/DashboardTable";
 import { type FilterState } from "@/src/features/filters/types";
 import { api } from "@/src/utils/api";
-import { compactNumberFormatter, usdFormatter } from "@/src/utils/numbers";
+import { compactNumberFormatter } from "@/src/utils/numbers";
 import { TotalMetric } from "./TotalMetric";
+import { totalCostDashboardFormatted } from "@/src/features/dashboard/lib/dashboard-utils";
 
 export const MetricTable = ({
   className,
@@ -19,7 +20,7 @@ export const MetricTable = ({
   const metrics = api.dashboard.chart.useQuery(
     {
       projectId,
-      from: "traces_observations",
+      from: "traces_observationsview",
       select: [
         { column: "calculatedTotalCost", agg: "SUM" },
         { column: "totalTokens", agg: "SUM" },
@@ -69,7 +70,9 @@ export const MetricTable = ({
           </RightAlignedCell>,
           <RightAlignedCell key={`${i}-cost`}>
             {item.sumCalculatedTotalCost
-              ? usdFormatter(item.sumCalculatedTotalCost as number, 2, 2)
+              ? totalCostDashboardFormatted(
+                  item.sumCalculatedTotalCost as number,
+                )
               : "$0"}
           </RightAlignedCell>,
         ])
@@ -91,7 +94,7 @@ export const MetricTable = ({
         collapse={{ collapsed: 5, expanded: 20 }}
       >
         <TotalMetric
-          metric={totalTokenCost ? usdFormatter(totalTokenCost, 2, 2) : "$0"}
+          metric={totalCostDashboardFormatted(totalTokenCost)}
           description="Total cost"
         >
           <DocPopup

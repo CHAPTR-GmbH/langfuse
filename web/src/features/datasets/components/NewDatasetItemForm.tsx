@@ -2,7 +2,6 @@ import { Button } from "@/src/components/ui/button";
 import * as z from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useForm } from "react-hook-form";
-import JsonView from "react18-json-view";
 import {
   Form,
   FormControl,
@@ -21,13 +20,14 @@ import {
 import { api } from "@/src/utils/api";
 import { useState } from "react";
 import { usePostHog } from "posthog-js/react";
-import { type Prisma } from "@prisma/client";
-import { jsonSchema } from "@/src/utils/zod";
+import { Textarea } from "@/src/components/ui/textarea";
+import { type Prisma } from "@langfuse/shared/src/db";
 
 const formSchema = z.object({
   datasetId: z.string().min(1, "Select a dataset"),
   input: z.string().refine(
     (value) => {
+      if (value === "") return true;
       try {
         JSON.parse(value);
         return true;
@@ -36,7 +36,8 @@ const formSchema = z.object({
       }
     },
     {
-      message: "Invalid input. Please provide a JSON object",
+      message:
+        "Invalid input. Please provide a JSON object or a string value enclosed in double quotes.",
     },
   ),
   expectedOutput: z.string().refine(
@@ -58,27 +59,25 @@ const formSchema = z.object({
 
 export const NewDatasetItemForm = (props: {
   projectId: string;
+  traceId?: string;
   observationId?: string;
-  observationInput?: Prisma.JsonValue;
-  observationOutput?: Prisma.JsonValue;
+  input?: Prisma.JsonValue;
+  output?: Prisma.JsonValue;
   datasetId?: string;
   onFormSuccess?: () => void;
 }) => {
   const [formError, setFormError] = useState<string | null>(null);
   const posthog = usePostHog();
-  const { observationInput, observationOutput } = props;
   const form = useForm<z.infer<typeof formSchema>>({
     resolver: zodResolver(formSchema),
     defaultValues: {
       datasetId: props.datasetId ?? "",
-      input: observationInput ? JSON.stringify(observationInput, null, 2) : "",
-      expectedOutput: observationOutput
-        ? JSON.stringify(observationOutput, null, 2)
-        : "",
+      input: props.input ? JSON.stringify(props.input, null, 2) : "",
+      expectedOutput: props.output ? JSON.stringify(props.output, null, 2) : "",
     },
   });
 
-  const datasets = api.datasets.allDatasets.useQuery({
+  const datasets = api.datasets.allDatasetMeta.useQuery({
     projectId: props.projectId,
   });
 
@@ -90,12 +89,14 @@ export const NewDatasetItemForm = (props: {
 
   function onSubmit(values: z.infer<typeof formSchema>) {
     posthog.capture("datasets:new_dataset_item_form_submit", {
+      hasSourceTrace: !!props.traceId,
       hasSourceObservation: !!props.observationId,
     });
     createDatasetItemMutation
       .mutateAsync({
         ...values,
         projectId: props.projectId,
+        sourceTraceId: props.traceId,
         sourceObservationId: props.observationId,
       })
       .then(() => {
@@ -145,17 +146,12 @@ export const NewDatasetItemForm = (props: {
             render={({ field }) => (
               <FormItem className="flex flex-col gap-2">
                 <FormLabel>Input</FormLabel>
-                <JsonView
-                  src={jsonSchema.parse(JSON.parse(field.value || "{}"))}
-                  onEdit={(edit) => {
-                    field.onChange(JSON.stringify(edit.src));
-                  }}
-                  onDelete={(edit) => {
-                    field.onChange(JSON.stringify(edit.src));
-                  }}
-                  editable
-                  className="rounded-md border border-gray-200 p-2 text-sm"
-                />
+                <FormControl>
+                  <Textarea
+                    {...field}
+                    className="min-h-[150px] flex-1 font-mono text-xs"
+                  />
+                </FormControl>
                 <FormMessage />
               </FormItem>
             )}
@@ -166,17 +162,12 @@ export const NewDatasetItemForm = (props: {
             render={({ field }) => (
               <FormItem className="flex flex-col gap-2">
                 <FormLabel>Expected output</FormLabel>
-                <JsonView
-                  src={jsonSchema.parse(JSON.parse(field.value || "{}"))}
-                  onEdit={(edit) => {
-                    field.onChange(JSON.stringify(edit.src));
-                  }}
-                  onDelete={(edit) => {
-                    field.onChange(JSON.stringify(edit.src));
-                  }}
-                  editable
-                  className="rounded-md border border-gray-200 p-2 text-sm"
-                />
+                <FormControl>
+                  <Textarea
+                    {...field}
+                    className="min-h-[150px] flex-1 font-mono text-xs"
+                  />
+                </FormControl>
                 <FormMessage />
               </FormItem>
             )}

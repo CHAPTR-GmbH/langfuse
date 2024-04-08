@@ -3,8 +3,7 @@ import {
   type timeFilter,
 } from "@/src/server/api/interfaces/filters";
 import { type ColumnDefinition } from "@/src/server/api/interfaces/tableDefinition";
-import { Prisma, type PrismaClient } from "@prisma/client";
-import { type Sql } from "@prisma/client/runtime/library";
+import { Prisma, type PrismaClient } from "@langfuse/shared/src/db";
 import Decimal from "decimal.js";
 import { type z } from "zod";
 import {
@@ -31,7 +30,6 @@ export const executeQuery = async (
 ) => {
   const query = sqlInterface.parse(unsafeQuery);
   const sql = enrichAndCreateQuery(projectId, query);
-
   const response = await prisma.$queryRaw<InternalDatabaseRow[]>(sql);
 
   const parsedResult = outputParser(response);
@@ -335,13 +333,13 @@ const getColumnDefinition = (
     return c.name === column;
   });
   if (!foundColumn) {
-    console.error(`Column ${column} not found in table ${table}`);
-    throw new Error(`Column ${column} not found in table ${table}`);
+    console.error(`Column "${column}" not found in table ${table}`);
+    throw new Error(`Column "${column}" not found in table ${table}`);
   }
   return foundColumn;
 };
 
-const getInternalSql = (colDef: ColumnDefinition): Sql =>
+const getInternalSql = (colDef: ColumnDefinition): Prisma.Sql =>
   // raw required here, everything is typed
   Prisma.raw(colDef.internal);
 
@@ -399,8 +397,10 @@ const getMandatoryFilter = (
   switch (table) {
     case "traces":
     case "traces_scores":
+    case "traces_metrics":
       return [traceFilter];
     case "traces_observations":
+    case "traces_observationsview":
     case "traces_parent_observation_scores":
       return [traceFilter, observationFilter];
     case "observations":

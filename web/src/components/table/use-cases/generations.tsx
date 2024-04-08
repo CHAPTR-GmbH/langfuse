@@ -23,11 +23,14 @@ import {
 } from "use-query-params";
 import { useQueryFilterState } from "@/src/features/filters/hooks/useFilterState";
 import { observationsTableColsWithOptions } from "@/src/server/api/definitions/observationsTable";
-import { formatIntervalSeconds, utcDateOffsetByDays } from "@/src/utils/dates";
+import {
+  formatIntervalSeconds,
+  intervalInSeconds,
+  utcDateOffsetByDays,
+} from "@/src/utils/dates";
 import useColumnVisibility from "@/src/features/column-visibility/hooks/useColumnVisibility";
-import { JSONView } from "@/src/components/ui/code";
 import { type LangfuseColumnDef } from "@/src/components/table/types";
-import { type Score, type ObservationLevel } from "@prisma/client";
+import { type ObservationLevel } from "@langfuse/shared/src/db";
 import { cn } from "@/src/utils/tailwind";
 import { LevelColors } from "@/src/components/level-colors";
 import { usdFormatter } from "@/src/utils/numbers";
@@ -37,18 +40,22 @@ import {
 } from "@/src/server/api/interfaces/exportTypes";
 import { useOrderByState } from "@/src/features/orderBy/hooks/useOrderByState";
 import type Decimal from "decimal.js";
+import { type ScoreSimplified } from "@/src/server/api/routers/generations/getAllQuery";
+import { IOCell } from "./IOCell";
+import { setSmallPaginationIfColumnsVisible } from "../../../features/column-visibility/hooks/setSmallPaginationIfColumnsVisible";
 
 export type GenerationsTableRow = {
   id: string;
-  traceId: string;
-  startTime: string;
+  traceId?: string;
+  startTime: Date;
   level?: ObservationLevel;
   statusMessage?: string;
   endTime?: string;
-  timeToFirstToken?: string;
+  completionStartTime?: Date;
   latency?: number;
   name?: string;
   model?: string;
+  // i/o not set explicitly, but fetched from the server from the cell
   input?: unknown;
   output?: unknown;
   inputCost?: Decimal;
@@ -56,7 +63,7 @@ export type GenerationsTableRow = {
   totalCost?: Decimal;
   traceName?: string;
   metadata?: string;
-  scores: Score[];
+  scores?: ScoreSimplified[];
   usage: {
     promptTokens: number;
     completionTokens: number;
@@ -84,14 +91,17 @@ export default function GenerationsTable({ projectId }: GenerationsTableProps) {
     pageSize: withDefault(NumberParam, 50),
   });
 
-  const [filterState, setFilterState] = useQueryFilterState([
-    {
-      column: "start_time",
-      type: "datetime",
-      operator: ">",
-      value: utcDateOffsetByDays(-14),
-    },
-  ]);
+  const [filterState, setFilterState] = useQueryFilterState(
+    [
+      {
+        column: "Start Time",
+        type: "datetime",
+        operator: ">",
+        value: utcDateOffsetByDays(-14),
+      },
+    ],
+    "generations",
+  );
 
   const [orderByState, setOrderByState] = useOrderByState({
     column: "startTime",
@@ -224,6 +234,10 @@ export default function GenerationsTable({ projectId }: GenerationsTableProps) {
       header: "Start Time",
       enableHiding: true,
       enableSorting: true,
+      cell: ({ row }) => {
+        const value: Date = row.getValue("startTime");
+        return value.toLocaleString();
+      },
     },
     {
       accessorKey: "endTime",
@@ -237,20 +251,25 @@ export default function GenerationsTable({ projectId }: GenerationsTableProps) {
       id: "timeToFirstToken",
       header: "Time to First Token",
       enableHiding: true,
+      enableSorting: true,
       cell: ({ row }) => {
-        const startTime: string = row.getValue("startTime");
-        const timeToFirstToken: string | undefined =
+        const startTime: Date = row.getValue("startTime");
+        const completionStartTime: Date | undefined =
           row.getValue("timeToFirstToken");
 
-        if (!timeToFirstToken) {
+        if (!completionStartTime) {
           return undefined;
         }
 
-        const latencyInMs =
-          new Date(timeToFirstToken).getTime() - new Date(startTime).getTime();
-        const latencyInSeconds = latencyInMs / 1000;
-
-        return <span>{formatIntervalSeconds(latencyInSeconds)}</span>;
+        const latencyInSeconds =
+          intervalInSeconds(startTime, completionStartTime) || "-";
+        return (
+          <span>
+            {typeof latencyInSeconds === "number"
+              ? formatIntervalSeconds(latencyInSeconds)
+              : latencyInSeconds}
+          </span>
+        );
       },
     },
     {
@@ -258,8 +277,10 @@ export default function GenerationsTable({ projectId }: GenerationsTableProps) {
       id: "scores",
       header: "Scores",
       cell: ({ row }) => {
-        const values: Score[] = row.getValue("scores");
-        return <GroupedScoreBadges scores={values} variant="headings" />;
+        const values: ScoreSimplified[] | undefined = row.getValue("scores");
+        return (
+          values && <GroupedScoreBadges scores={values} variant="headings" />
+        );
       },
       enableHiding: true,
     },
@@ -298,9 +319,11 @@ export default function GenerationsTable({ projectId }: GenerationsTableProps) {
       },
       defaultHidden: true,
       enableHiding: true,
+      enableSorting: true,
     },
     {
       accessorKey: "inputCost",
+      id: "inputCost",
       header: "Input Cost",
       cell: ({ row }) => {
         const value: Decimal | undefined = row.getValue("inputCost");
@@ -311,9 +334,11 @@ export default function GenerationsTable({ projectId }: GenerationsTableProps) {
       },
       enableHiding: true,
       defaultHidden: true,
+      enableSorting: true,
     },
     {
       accessorKey: "outputCost",
+      id: "outputCost",
       header: "Output Cost",
       cell: ({ row }) => {
         const value: Decimal | undefined = row.getValue("outputCost");
@@ -324,10 +349,12 @@ export default function GenerationsTable({ projectId }: GenerationsTableProps) {
       },
       enableHiding: true,
       defaultHidden: true,
+      enableSorting: true,
     },
     {
       accessorKey: "totalCost",
       header: "Total Cost",
+      id: "totalCost",
       cell: ({ row }) => {
         const value: Decimal | undefined = row.getValue("totalCost");
 
@@ -336,6 +363,7 @@ export default function GenerationsTable({ projectId }: GenerationsTableProps) {
         ) : undefined;
       },
       enableHiding: true,
+      enableSorting: true,
     },
     {
       accessorKey: "level",
@@ -361,6 +389,7 @@ export default function GenerationsTable({ projectId }: GenerationsTableProps) {
     {
       accessorKey: "statusMessage",
       header: "Status Message",
+      id: "statusMessage",
       enableHiding: true,
       defaultHidden: true,
     },
@@ -372,8 +401,57 @@ export default function GenerationsTable({ projectId }: GenerationsTableProps) {
       enableSorting: true,
     },
     {
+      accessorKey: "inputTokens",
+      id: "inputTokens",
+      header: "Input Tokens",
+      enableHiding: true,
+      defaultHidden: true,
+      enableSorting: true,
+      cell: ({ row }) => {
+        const value: {
+          promptTokens: number;
+          completionTokens: number;
+          totalTokens: number;
+        } = row.getValue("usage");
+        return <span>{value.promptTokens}</span>;
+      },
+    },
+    {
+      accessorKey: "outputTokens",
+      id: "outputTokens",
+      header: "Output Tokens",
+      enableHiding: true,
+      defaultHidden: true,
+      enableSorting: true,
+      cell: ({ row }) => {
+        const value: {
+          promptTokens: number;
+          completionTokens: number;
+          totalTokens: number;
+        } = row.getValue("usage");
+        return <span>{value.completionTokens}</span>;
+      },
+    },
+    {
+      accessorKey: "totalTokens",
+      id: "totalTokens",
+      header: "Total Tokens",
+      enableHiding: true,
+      defaultHidden: true,
+      enableSorting: true,
+      cell: ({ row }) => {
+        const value: {
+          promptTokens: number;
+          completionTokens: number;
+          totalTokens: number;
+        } = row.getValue("usage");
+        return <span>{value.totalTokens}</span>;
+      },
+    },
+    {
       accessorKey: "usage",
       header: "Usage",
+      id: "usage",
       cell: ({ row }) => {
         const value: {
           promptTokens: number;
@@ -390,23 +468,40 @@ export default function GenerationsTable({ projectId }: GenerationsTableProps) {
         );
       },
       enableHiding: true,
+      enableSorting: true,
     },
     {
       accessorKey: "input",
       header: "Input",
+      id: "input",
       cell: ({ row }) => {
-        const value: unknown = row.getValue("input");
-        return <JSONView json={value} className="w-[500px]" />;
+        const observationId: string = row.getValue("id");
+        const traceId: string = row.getValue("traceId");
+        return (
+          <GenerationsIOCell
+            observationId={observationId}
+            traceId={traceId}
+            io="input"
+          />
+        );
       },
       enableHiding: true,
       defaultHidden: true,
     },
     {
       accessorKey: "output",
+      id: "output",
       header: "Output",
       cell: ({ row }) => {
-        const value: unknown = row.getValue("output");
-        return <JSONView json={value} className="w-[500px] bg-green-50" />;
+        const observationId: string = row.getValue("id");
+        const traceId: string = row.getValue("traceId");
+        return (
+          <GenerationsIOCell
+            observationId={observationId}
+            traceId={traceId}
+            io="output"
+          />
+        );
       },
       enableHiding: true,
       defaultHidden: true,
@@ -429,8 +524,8 @@ export default function GenerationsTable({ projectId }: GenerationsTableProps) {
       enableSorting: true,
     },
     {
-      accessorKey: "prompt",
-      id: "prompt",
+      accessorKey: "promptName",
+      id: "promptName",
       header: "Prompt",
       enableHiding: true,
       enableSorting: true,
@@ -457,28 +552,22 @@ export default function GenerationsTable({ projectId }: GenerationsTableProps) {
       columns,
     );
 
-  const smallTableRequired =
-    columnVisibility["input"] === true || columnVisibility["output"] === true;
-
-  if (smallTableRequired && paginationState.pageSize !== 10) {
-    setPaginationState((prev) => {
-      const currentPage = prev.pageIndex;
-      const currentPageSize = prev.pageSize;
-      const newPageIndex = Math.floor((currentPage * currentPageSize) / 10);
-      return { pageIndex: newPageIndex, pageSize: 10 };
-    });
-  }
+  const smallTableRequired = setSmallPaginationIfColumnsVisible(
+    columnVisibility,
+    ["input", "output"],
+    paginationState,
+    setPaginationState,
+  );
 
   const rows: GenerationsTableRow[] = generations.isSuccess
     ? generations.data.generations.map((generation) => {
         return {
           id: generation.id,
-          traceId: generation.traceId,
-          traceName: generation.traceName,
-          startTime: generation.startTime.toLocaleString(),
+          traceId: generation.traceId ?? undefined,
+          traceName: generation.traceName ?? "",
+          startTime: generation.startTime,
           endTime: generation.endTime?.toLocaleString() ?? undefined,
-          timeToFirstToken:
-            generation.completionStartTime?.toLocaleString() ?? undefined,
+          timeToFirstToken: generation.completionStartTime ?? undefined,
           latency: generation.latency ?? undefined,
           totalCost: generation.calculatedTotalCost ?? undefined,
           inputCost: generation.calculatedInputCost ?? undefined,
@@ -486,9 +575,7 @@ export default function GenerationsTable({ projectId }: GenerationsTableProps) {
           name: generation.name ?? undefined,
           version: generation.version ?? "",
           model: generation.model ?? "",
-          input: generation.input,
           scores: generation.scores,
-          output: generation.output,
           level: generation.level,
           metadata: generation.metadata
             ? JSON.stringify(generation.metadata)
@@ -586,3 +673,36 @@ export default function GenerationsTable({ projectId }: GenerationsTableProps) {
     </div>
   );
 }
+
+const GenerationsIOCell = ({
+  traceId,
+  observationId,
+  io,
+}: {
+  traceId: string;
+  observationId: string;
+  io: "input" | "output";
+}) => {
+  const observation = api.observations.byId.useQuery(
+    {
+      observationId: observationId,
+      traceId: traceId,
+    },
+    {
+      enabled: typeof traceId === "string" && typeof observationId === "string",
+      trpc: {
+        context: {
+          skipBatch: true,
+        },
+      },
+    },
+  );
+  return (
+    <IOCell
+      isLoading={observation.isLoading}
+      data={
+        io === "output" ? observation.data?.output : observation.data?.input
+      }
+    />
+  );
+};

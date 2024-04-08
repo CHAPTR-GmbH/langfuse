@@ -5,7 +5,12 @@ import {
   protectedGetTraceProcedure,
   protectedProjectProcedure,
 } from "@/src/server/api/trpc";
-import { Prisma, type Trace, type ObservationView } from "@prisma/client";
+import {
+  Prisma,
+  type Trace,
+  type ObservationView,
+  type ObservationLevel,
+} from "@langfuse/shared/src/db";
 import { paginationZod } from "@/src/utils/zod";
 import { singleFilter } from "@/src/server/api/interfaces/filters";
 import {
@@ -20,7 +25,6 @@ import { throwIfNoAccess } from "@/src/features/rbac/utils/checkAccess";
 import { TRPCError } from "@trpc/server";
 import { orderBy } from "@/src/server/api/interfaces/orderBy";
 import { orderByToPrismaSql } from "@/src/features/orderBy/server/orderByToPrisma";
-import { type Sql } from "@prisma/client/runtime/library";
 import { instrumentAsync } from "@/src/utils/instrumentation";
 import type Decimal from "decimal.js";
 import { auditLog } from "@/src/features/audit-logs/auditLog";
@@ -30,6 +34,7 @@ const TraceFilterOptions = z.object({
   searchQuery: z.string().nullable(),
   filter: z.array(singleFilter).nullable(),
   orderBy: orderBy,
+  returnIO: z.boolean().default(true),
   ...paginationZod,
 });
 
@@ -44,6 +49,7 @@ export const traceRouter = createTRPCRouter({
   all: protectedProjectProcedure
     .input(TraceFilterOptions)
     .query(async ({ input, ctx }) => {
+      const returnIO = input.returnIO;
       const filterCondition = tableColumnsToSqlFilterAndPrefix(
         input.filter ?? [],
         tracesTableCols,
@@ -82,11 +88,14 @@ export const traceRouter = createTRPCRouter({
           t."metadata" AS "metadata",
           t.session_id AS "sessionId",
           t."bookmarked" AS "bookmarked",
-          COALESCE(u."promptTokens", 0)::int AS "promptTokens",
-          COALESCE(u."completionTokens", 0)::int AS "completionTokens",
-          COALESCE(u."totalTokens", 0)::int AS "totalTokens",
+          COALESCE(tm."promptTokens", 0)::int AS "promptTokens",
+          COALESCE(tm."completionTokens", 0)::int AS "completionTokens",
+          COALESCE(tm."totalTokens", 0)::int AS "totalTokens",
           tl.latency AS "latency",
-          COALESCE(u."calculatedTotalCost", 0)::numeric AS "calculatedTotalCost"
+          COALESCE(tm."calculatedTotalCost", 0)::numeric AS "calculatedTotalCost",
+          COALESCE(tm."calculatedInputCost", 0)::numeric AS "calculatedInputCost",
+          COALESCE(tm."calculatedOutputCost", 0)::numeric AS "calculatedOutputCost",
+          tm."level" AS "level"
           `,
 
         input.projectId,
@@ -109,7 +118,10 @@ export const traceRouter = createTRPCRouter({
                 totalTokens: number;
                 totalCount: number;
                 latency: number | null;
+                level: ObservationLevel;
                 calculatedTotalCost: Decimal | null;
+                calculatedInputCost: Decimal | null;
+                calculatedOutputCost: Decimal | null;
               }
             >
           >(tracesQuery),
@@ -145,7 +157,17 @@ export const traceRouter = createTRPCRouter({
       return {
         traces: traces.map((trace) => {
           const filteredScores = scores.filter((s) => s.traceId === trace.id);
-          return { ...trace, scores: filteredScores };
+          const { input, output, ...rest } = trace;
+          if (returnIO) {
+            return { ...rest, input, output, scores: filteredScores };
+          } else {
+            return {
+              ...rest,
+              input: undefined,
+              output: undefined,
+              scores: filteredScores,
+            };
+          }
         }),
         totalCount: totalTraceCount ? Number(totalTraceCount) : undefined,
       };
@@ -199,9 +221,12 @@ export const traceRouter = createTRPCRouter({
       return res;
     }),
   byId: protectedGetTraceProcedure
-    .input(z.object({ traceId: z.string() }))
+    .input(
+      z.object({
+        traceId: z.string(),
+      }),
+    )
     .query(async ({ input, ctx }) => {
-      console.log("input", input);
       const trace = await ctx.prisma.trace.findFirstOrThrow({
         where: {
           id: input.traceId,
@@ -454,14 +479,14 @@ export const traceRouter = createTRPCRouter({
 });
 
 function createTracesQuery(
-  select: Sql,
+  select: Prisma.Sql,
   projectId: string,
-  observationTimeseriesFilter: Sql,
+  observationTimeseriesFilter: Prisma.Sql,
   page: number,
   limit: number,
-  searchCondition: Sql,
-  filterCondition: Sql,
-  orderByCondition: Sql,
+  searchCondition: Prisma.Sql,
+  filterCondition: Prisma.Sql,
+  orderByCondition: Prisma.Sql,
 ) {
   return Prisma.sql`
   SELECT
@@ -470,19 +495,26 @@ function createTracesQuery(
     "traces" AS t
   LEFT JOIN LATERAL (
     SELECT
-        SUM(prompt_tokens) AS "promptTokens",
-        SUM(completion_tokens) AS "completionTokens",
-        SUM(total_tokens) AS "totalTokens",
-        SUM(calculated_total_cost) AS "calculatedTotalCost"
+      SUM(prompt_tokens) AS "promptTokens",
+      SUM(completion_tokens) AS "completionTokens",
+      SUM(total_tokens) AS "totalTokens",
+      SUM(calculated_total_cost) AS "calculatedTotalCost",
+      SUM(calculated_input_cost) AS "calculatedInputCost",
+      SUM(calculated_output_cost) AS "calculatedOutputCost",
+      COALESCE(  
+        MAX(CASE WHEN level = 'ERROR' THEN 'ERROR' END),  
+        MAX(CASE WHEN level = 'WARNING' THEN 'WARNING' END),  
+        MAX(CASE WHEN level = 'DEFAULT' THEN 'DEFAULT' END),  
+        'DEBUG'  
+      ) AS "level"
     FROM
-        "observations_view"
+      "observations_view"
     WHERE
-        trace_id = t.id
-        AND "type" = 'GENERATION'
-
-        AND "project_id" = ${projectId}
-        ${observationTimeseriesFilter}
-  ) AS u ON true
+      trace_id = t.id
+      AND "type" = 'GENERATION'
+      AND "project_id" = ${projectId}
+      ${observationTimeseriesFilter}
+  ) AS tm ON true
   LEFT JOIN LATERAL (
     SELECT
         EXTRACT(EPOCH FROM COALESCE(MAX("end_time"), MAX("start_time"))) - EXTRACT(EPOCH FROM MIN("start_time"))::double precision AS "latency"

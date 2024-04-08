@@ -1,8 +1,8 @@
-import { prisma } from "@/src/server/db";
-import { jsonSchema } from "@/src/utils/zod";
+import { prisma } from "@langfuse/shared/src/db";
 import * as Sentry from "@sentry/nextjs";
 import { ProfilingIntegration } from "@sentry/profiling-node";
 import type { SamplingContext, TransactionEvent } from "@sentry/types";
+import { jsonSchema } from "@/src/utils/zod";
 
 if (process.env.NEXT_PUBLIC_SENTRY_DSN)
   Sentry.init({
@@ -12,7 +12,6 @@ if (process.env.NEXT_PUBLIC_SENTRY_DSN)
     // Set tracesSampleRate to 1.0 to capture 100%
     // of transactions for performance monitoring.
     // We recommend adjusting this value in production
-    tracesSampleRate: 1.0,
     tracesSampler: (samplingContext: SamplingContext) => {
       if (
         samplingContext.request &&
@@ -20,12 +19,12 @@ if (process.env.NEXT_PUBLIC_SENTRY_DSN)
         samplingContext.request.url &&
         samplingContext.request.url.includes("api/trpc")
       ) {
-        return 1.0;
+        return 0.9;
       }
-      return 1.0;
+      return 0.15;
     },
 
-    profilesSampleRate: 0.3, // Profiling sample rate is relative to tracesSampleRate
+    profilesSampleRate: 0.2, // Profiling sample rate is relative to tracesSampleRate
     integrations: [
       // Add profiling integration to list of integrations
       new ProfilingIntegration(),

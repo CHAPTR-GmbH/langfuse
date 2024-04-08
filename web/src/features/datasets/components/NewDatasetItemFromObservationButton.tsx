@@ -18,27 +18,30 @@ import {
 } from "@/src/components/ui/dropdown-menu";
 import Link from "next/link";
 import { NewDatasetItemForm } from "@/src/features/datasets/components/NewDatasetItemForm";
-import { type Prisma } from "@prisma/client";
+import { type Prisma } from "@langfuse/shared/src/db";
 import { useHasAccess } from "@/src/features/rbac/utils/checkAccess";
 import { useSession } from "next-auth/react";
 
-export const NewDatasetItemFromObservationButton = (props: {
+export const NewDatasetItemFromTrace = (props: {
   projectId: string;
-  observationId: string;
-  observationInput: Prisma.JsonValue;
-  observationOutput: Prisma.JsonValue;
+  traceId: string;
+  observationId?: string;
+  input: Prisma.JsonValue;
+  output: Prisma.JsonValue;
 }) => {
   const [open, setOpen] = useState(false);
   const session = useSession();
-  const observationInDatasets = api.datasets.observationInDatasets.useQuery(
-    {
-      projectId: props.projectId,
-      observationId: props.observationId,
-    },
-    {
-      enabled: session.status === "authenticated",
-    },
-  );
+  const observationInDatasets =
+    api.datasets.datasetItemsBasedOnTraceOrObservation.useQuery(
+      {
+        projectId: props.projectId,
+        traceId: props.traceId,
+        observationId: props.observationId,
+      },
+      {
+        enabled: session.status === "authenticated",
+      },
+    );
   const hasAccess = useHasAccess({
     projectId: props.projectId,
     scope: "datasets:CUD",
@@ -103,10 +106,11 @@ export const NewDatasetItemFromObservationButton = (props: {
             <DialogTitle className="mb-5">Add to dataset</DialogTitle>
           </DialogHeader>
           <NewDatasetItemForm
+            traceId={props.traceId}
             observationId={props.observationId}
             projectId={props.projectId}
-            observationInput={props.observationInput}
-            observationOutput={props.observationOutput}
+            input={props.input}
+            output={props.output}
             onFormSuccess={() => setOpen(false)}
           />
         </DialogContent>

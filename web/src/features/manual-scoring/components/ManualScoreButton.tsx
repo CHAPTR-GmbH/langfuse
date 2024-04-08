@@ -18,7 +18,7 @@ import {
 import { Textarea } from "@/src/components/ui/textarea";
 import { api } from "@/src/utils/api";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { type Score } from "@prisma/client";
+import { type Score } from "@langfuse/shared/src/db";
 import { useState } from "react";
 import * as z from "zod";
 
@@ -69,9 +69,15 @@ export function ManualScoreButton({
       utils.sessions.invalidate(),
     ]);
   };
-  const mutCreateScore = api.scores.create.useMutation({ onSuccess });
-  const mutUpdateScore = api.scores.update.useMutation({ onSuccess });
-  const mutDeleteScore = api.scores.delete.useMutation({ onSuccess });
+  const mutCreateScore = api.scores.createReviewScore.useMutation({
+    onSuccess,
+  });
+  const mutUpdateScore = api.scores.updateReviewScore.useMutation({
+    onSuccess,
+  });
+  const mutDeleteScore = api.scores.deleteReviewScore.useMutation({
+    onSuccess,
+  });
 
   const handleDelete = async () => {
     if (score) {

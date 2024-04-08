@@ -1,7 +1,7 @@
 import { type NextApiRequest, type NextApiResponse } from "next";
 import { z } from "zod";
 import { cors, runMiddleware } from "@/src/features/public-api/server/cors";
-import { prisma } from "@/src/server/db";
+import { prisma } from "@langfuse/shared/src/db";
 import { verifyAuthHeaderAndReturnScope } from "@/src/features/public-api/server/apiAuth";
 import { jsonSchema } from "@/src/utils/zod";
 import { v4 as uuidv4 } from "uuid";
@@ -9,7 +9,7 @@ import { isPrismaException } from "@/src/utils/exceptions";
 
 const CreateDatasetItemSchema = z.object({
   datasetName: z.string(),
-  input: jsonSchema,
+  input: jsonSchema.nullish(),
   expectedOutput: jsonSchema.nullish(),
   id: z.string().nullish(),
 });
@@ -41,10 +41,11 @@ export default async function handler(
       const itemBody = CreateDatasetItemSchema.parse(req.body);
 
       // CHECK ACCESS SCOPE
-      if (authCheck.scope.accessLevel !== "all")
-        return res.status(403).json({
-          message: "Access denied",
+      if (authCheck.scope.accessLevel !== "all") {
+        return res.status(401).json({
+          message: "Access denied - need to use basic auth with secret key",
         });
+      }
       // END CHECK ACCESS SCOPE
 
       // Check access to dataset
@@ -68,12 +69,12 @@ export default async function handler(
         },
         create: {
           id,
-          input: itemBody.input,
+          input: itemBody.input ?? undefined,
           expectedOutput: itemBody.expectedOutput ?? undefined,
           datasetId: dataset.id,
         },
         update: {
-          input: itemBody.input,
+          input: itemBody.input ?? undefined,
           expectedOutput: itemBody.expectedOutput ?? undefined,
         },
       });
